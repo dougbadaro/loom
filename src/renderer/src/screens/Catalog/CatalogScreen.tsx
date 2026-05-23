@@ -11,12 +11,12 @@ import { ErrorMsg } from '@renderer/components/ui/ErrorMsg'
 import { Spinner } from '@renderer/components/ui/Spinner'
 
 import { CatalogHeader } from './components/CatalogHeader'
-import { CatalogSidebar } from './components/CatalogSidebar'
-import { CatalogGrid } from './components/CatalogGrid'
-
-import { MovieCard } from './components/cards/MovieCard'
-import { SeriesCard } from './components/cards/SeriesCard'
-import { LiveCard } from './components/cards/LiveCard'
+import { LiveLayout } from './components/layouts/LiveLayout'
+import { MoviesLayout } from './components/layouts/MoviesLayout'
+import { SeriesLayout } from './components/layouts/SeriesLayout'
+import { LiveSidebar } from './components/sidebars/LiveSidebar'
+import { MoviesSidebar } from './components/sidebars/MoviesSidebar'
+import { SeriesSidebar } from './components/sidebars/SeriesSidebar'
 
 interface CatalogScreenProps {
   credentials: Credenciais
@@ -46,6 +46,7 @@ export function CatalogScreen({
   const [tipoCatalogo, setTipoCatalogo] = useState<TipoCatalogo>(initialTab)
 
   const [categorias, setCategorias] = useState<Categoria[]>([])
+
   const [categoriaAtiva, setCategoriaAtiva] = useState<string | null>(null)
 
   const [movies, setMovies] = useState<Midia[]>([])
@@ -55,6 +56,7 @@ export function CatalogScreen({
   const [activeVideo, setActiveVideo] = useState<string | null>(null)
 
   const [loading, setLoading] = useState(false)
+
   const [error, setError] = useState<string | null>(null)
 
   // =========================
@@ -127,7 +129,7 @@ export function CatalogScreen({
   }, [categoriaAtiva, tipoCatalogo, credentials])
 
   // =========================
-  // Handle Click
+  // Handle Item Click
   // =========================
 
   const handleItemClick = async (movie: Midia) => {
@@ -165,48 +167,70 @@ export function CatalogScreen({
   }
 
   // =========================
+  // Render Sidebar
+  // =========================
+
+  const renderSidebar = () => {
+    switch (tipoCatalogo) {
+      case 'live':
+        return (
+          <LiveSidebar
+            categorias={categorias}
+            categoriaAtiva={categoriaAtiva}
+            onSelectCategory={setCategoriaAtiva}
+          />
+        )
+
+      case 'series':
+        return (
+          <SeriesSidebar
+            categorias={categorias}
+            categoriaAtiva={categoriaAtiva}
+            onSelectCategory={setCategoriaAtiva}
+          />
+        )
+
+      case 'vod':
+      default:
+        return (
+          <MoviesSidebar
+            categorias={categorias}
+            categoriaAtiva={categoriaAtiva}
+            onSelectCategory={setCategoriaAtiva}
+          />
+        )
+    }
+  }
+
+  // =========================
   // Render Layout
   // =========================
 
   const renderContent = () => {
     switch (tipoCatalogo) {
       case 'live':
-        return (
-          <CatalogGrid>
-            {movies.map((movie) => (
-              <LiveCard key={movie.id} channel={movie} onClick={handleItemClick} />
-            ))}
-          </CatalogGrid>
-        )
+        return <LiveLayout channels={movies} onItemClick={handleItemClick} />
 
       case 'series':
-        return (
-          <CatalogGrid>
-            {movies.map((movie) => (
-              <SeriesCard key={movie.id} series={movie} onClick={handleItemClick} />
-            ))}
-          </CatalogGrid>
-        )
+        return <SeriesLayout series={movies} onItemClick={handleItemClick} />
 
       case 'vod':
       default:
-        return (
-          <CatalogGrid>
-            {movies.map((movie) => (
-              <MovieCard key={movie.id} movie={movie} onClick={handleItemClick} />
-            ))}
-          </CatalogGrid>
-        )
+        return <MoviesLayout movies={movies} onItemClick={handleItemClick} />
     }
   }
 
   // =========================
-  // Screens
+  // Player Screen
   // =========================
 
   if (activeVideo) {
     return <PlayerScreen url={activeVideo} onBack={() => setActiveVideo(null)} />
   }
+
+  // =========================
+  // Series Screen
+  // =========================
 
   if (activeSeriesData) {
     return (
@@ -228,13 +252,27 @@ export function CatalogScreen({
       style={{
         display: 'flex',
         flexDirection: 'column',
+
         height: '100vh',
         width: '100vw',
+
+        overflow: 'hidden',
+
         fontFamily: tokens.font,
+
         color: tokens.textPrimary,
-        backgroundColor: tokens.bg
+
+        background: `
+          radial-gradient(
+            circle at top,
+            rgba(255,255,255,0.03),
+            transparent 40%
+          ),
+          ${tokens.bg}
+        `
       }}
     >
+      {/* Header */}
       <CatalogHeader
         tipoCatalogo={tipoCatalogo}
         onChangeTab={(tipo) => {
@@ -245,6 +283,7 @@ export function CatalogScreen({
         onLogout={onLogout}
       />
 
+      {/* Body */}
       <div
         style={{
           display: 'flex',
@@ -252,21 +291,26 @@ export function CatalogScreen({
           overflow: 'hidden'
         }}
       >
-        <CatalogSidebar
-          categorias={categorias}
-          categoriaAtiva={categoriaAtiva}
-          onSelectCategory={setCategoriaAtiva}
-        />
+        {/* Sidebar */}
+        {renderSidebar()}
 
+        {/* Content */}
         <main
           style={{
             flex: 1,
-            padding: '32px 36px',
+
+            padding: '34px 38px',
+
             overflowY: 'auto',
-            backgroundColor: tokens.bg
+
+            background: 'transparent'
           }}
         >
-          {error && <ErrorMsg msg={error} />}
+          {error && (
+            <div style={{ marginBottom: '24px' }}>
+              <ErrorMsg msg={error} />
+            </div>
+          )}
 
           {loading ? <Spinner /> : renderContent()}
         </main>

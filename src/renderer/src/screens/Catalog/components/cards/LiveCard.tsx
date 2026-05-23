@@ -12,101 +12,125 @@ export function LiveCard({ channel, onClick }: LiveCardProps) {
       onClick={() => onClick(channel)}
       style={{
         cursor: 'pointer',
+        borderRadius: '22px',
+        padding: '18px',
+        background: 'rgba(255,255,255,0.03)',
+        border: `1px solid ${tokens.border}`,
+        backdropFilter: 'blur(12px)',
+        transition: 'all 0.2s ease',
         display: 'flex',
-        flexDirection: 'column',
-        gap: '10px'
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: '18px',
+        minHeight: '96px'
       }}
     >
-      <div
-        className="media-card"
-        style={{
-          width: '100%',
-          aspectRatio: '16/9',
-          backgroundColor: tokens.surface,
-          borderRadius: tokens.radius.lg,
-          overflow: 'hidden',
-          border: `1px solid ${tokens.border}`,
-          position: 'relative'
-        }}
-      >
-        {channel.capa ? (
-          <img
-            src={channel.capa}
-            alt={channel.nome}
-            style={{
-              width: '100%',
-              height: '100%',
-              objectFit: 'cover',
-              display: 'block'
-            }}
-            onError={(e) => {
-              e.currentTarget.style.display = 'none'
-            }}
-          />
-        ) : (
-          <div
-            style={{
-              width: '100%',
-              height: '100%',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: tokens.textTertiary,
-              fontSize: '24px',
-              fontWeight: 700
-            }}
-          >
-            {channel.nome.charAt(0).toUpperCase()}
-          </div>
-        )}
-
-        {/* Badge AO VIVO */}
-        <div
-          style={{
-            position: 'absolute',
-            top: '10px',
-            left: '10px',
-            backgroundColor: '#ff2d55',
-            color: '#fff',
-            fontSize: '11px',
-            fontWeight: 700,
-            padding: '4px 8px',
-            borderRadius: '999px',
-            letterSpacing: '0.5px'
-          }}
-        >
-          AO VIVO
-        </div>
-      </div>
-
+      {/* Left */}
       <div
         style={{
           display: 'flex',
-          flexDirection: 'column',
-          gap: '4px'
+          alignItems: 'center',
+          gap: '18px',
+          minWidth: 0
         }}
       >
-        <p
+        {/* Logo */}
+        <div
           style={{
-            fontSize: '14px',
-            fontWeight: 600,
-            color: tokens.textPrimary,
-            margin: 0,
-            whiteSpace: 'nowrap',
+            width: '72px',
+            height: '72px',
+            borderRadius: '18px',
+            background: '#fff',
             overflow: 'hidden',
-            textOverflow: 'ellipsis'
+            flexShrink: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center'
           }}
         >
-          {channel.nome}
-        </p>
+          {channel.capa ? (
+            <img
+              src={channel.capa}
+              alt={channel.nome}
+              style={{
+                width: '100%',
+                height: '100%',
+                objectFit: 'contain',
+                padding: '10px'
+              }}
+            />
+          ) : (
+            <span
+              style={{
+                fontSize: '24px',
+                fontWeight: 700,
+                color: '#000'
+              }}
+            >
+              {channel.nome.charAt(0)}
+            </span>
+          )}
+        </div>
+
+        {/* Info */}
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            minWidth: 0
+          }}
+        >
+          <span
+            style={{
+              fontSize: '18px',
+              fontWeight: 600,
+              color: tokens.textPrimary,
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis'
+            }}
+          >
+            {channel.nome}
+          </span>
+
+          <span
+            style={{
+              marginTop: '4px',
+              fontSize: '13px',
+              color: tokens.textSecondary
+            }}
+          >
+            Canal ao vivo
+          </span>
+        </div>
+      </div>
+
+      {/* Right */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '12px',
+          flexShrink: 0
+        }}
+      >
+        <div
+          style={{
+            width: '8px',
+            height: '8px',
+            borderRadius: '999px',
+            background: '#ff453a'
+          }}
+        />
 
         <span
           style={{
-            fontSize: '12px',
-            color: tokens.textSecondary
+            fontSize: '13px',
+            fontWeight: 600,
+            color: '#ff453a'
           }}
         >
-          Canal de TV
+          AO VIVO
         </span>
       </div>
     </div>

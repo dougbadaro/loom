@@ -127,18 +127,64 @@ app.whenReady().then(() => {
     'fetch-catalog',
     async (_, request: { credentials: Credenciais; action: string; category_id?: string }) => {
       const { credentials, action, category_id } = request
+
+      // Cache separado por usuário + ação
       const key = cacheKey(credentials, action)
 
       try {
+        // ─────────────────────────────────────────────────────────────
+        // Se já existe cache em RAM
+        // ─────────────────────────────────────────────────────────────
+
         if (!ramCache.has(key)) {
+          // Evita múltiplos fetch simultâneos
           if (!fetchPromises.has(key)) {
             const promise = (async () => {
               const url = buildApiUrl(credentials, action)
-              const response = await axios.get(url, { responseType: 'json', timeout: 30000 })
 
-              const normalizedData: NormalizedItem[] = response.data
-                .map((item: XtreamRawItem) => {
+              console.log('\n==============================')
+              console.log('FETCH CATALOG')
+              console.log('ACTION:', action)
+              console.log('URL:', url)
+
+              const response = await axios.get(url, {
+                responseType: 'json',
+                timeout: 120000,
+                maxContentLength: Infinity,
+                maxBodyLength: Infinity
+              })
+
+              console.log('RESPONSE RECEIVED')
+
+              // ─────────────────────────────────────────────────────────
+              // Alguns painéis retornam arrays
+              // outros retornam objetos
+              // ─────────────────────────────────────────────────────────
+
+              let rawData: XtreamRawItem[] = []
+
+              if (Array.isArray(response.data)) {
+                rawData = response.data
+              } else if (response.data?.available_channels) {
+                rawData = response.data.available_channels
+              } else if (response.data?.movies) {
+                rawData = response.data.movies
+              } else if (response.data?.series) {
+                rawData = response.data.series
+              } else if (response.data?.data) {
+                rawData = response.data.data
+              }
+
+              console.log('RAW ITEMS:', rawData.length)
+
+              // ─────────────────────────────────────────────────────────
+              // Normalização
+              // ─────────────────────────────────────────────────────────
+
+              const normalizedData = rawData
+                .map((item: XtreamRawItem): NormalizedItem | null => {
                   switch (action) {
+                    // ─── Canais ────────────────────────────────────────
                     case 'get_live_streams':
                       return {
                         id: item.stream_id,
@@ -148,6 +194,8 @@ app.whenReady().then(() => {
                         extensao: '',
                         categoria_id: String(item.category_id ?? '0')
                       }
+
+                    // ─── Filmes ────────────────────────────────────────
                     case 'get_vod_streams':
                       return {
                         id: item.stream_id,
@@ -157,6 +205,8 @@ app.whenReady().then(() => {
                         extensao: item.container_extension || 'mp4',
                         categoria_id: String(item.category_id ?? '0')
                       }
+
+                    // ─── Séries ────────────────────────────────────────
                     case 'get_series':
                       return {
                         id: item.series_id,
@@ -166,35 +216,64 @@ app.whenReady().then(() => {
                         extensao: '',
                         categoria_id: String(item.category_id ?? '0')
                       }
+
                     default:
                       return null
                   }
                 })
-                .filter(Boolean)
+                .filter((item): item is NormalizedItem => item !== null)
+
+              console.log('NORMALIZED ITEMS:', normalizedData.length)
+
+              // ─────────────────────────────────────────────────────────
+              // Salva cache RAM
+              // ─────────────────────────────────────────────────────────
 
               ramCache.set(key, normalizedData)
-              // Limpa a promise após resolver — libera memória e permite retry futuro
+
+              // Limpa promise
               fetchPromises.delete(key)
+
               return normalizedData
             })()
 
             fetchPromises.set(key, promise)
           }
 
-          await fetchPromises.get(key)!
+          await fetchPromises.get(key)
         }
 
-        const allData = ramCache.get(key)!
+        // ─────────────────────────────────────────────────────────────
+        // Obtém cache
+        // ─────────────────────────────────────────────────────────────
+
+        const allData = ramCache.get(key) || []
+
+        console.log('TOTAL CACHE ITEMS:', allData.length)
+
+        // ─────────────────────────────────────────────────────────────
+        // Filtra categoria
+        // ─────────────────────────────────────────────────────────────
 
         const result =
           category_id && category_id !== ''
-            ? allData.filter((m) => m.categoria_id === category_id)
+            ? allData.filter((m) => String(m.categoria_id) === String(category_id))
             : allData
+
+        console.log('FILTERED ITEMS:', result.length)
+        console.log('==============================\n')
 
         return result
       } catch (error: unknown) {
         fetchPromises.delete(key)
-        return { error: error instanceof Error ? error.message : 'Erro ao buscar catálogo.' }
+
+        console.error('\n❌ FETCH CATALOG ERROR')
+        console.error(error)
+        console.error('==============================\n')
+
+        return {
+          error: error instanceof Error ? error.message : 'Erro ao buscar catálogo.'
+        }
       }
     }
   )

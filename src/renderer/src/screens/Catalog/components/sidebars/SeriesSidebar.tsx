@@ -1,5 +1,6 @@
+import { useMemo, useState } from 'react'
 import { tokens } from '@renderer/styles/tokens'
-import { Categoria } from '@renderer/types'
+import type { Categoria } from '@renderer/types'
 
 interface SeriesSidebarProps {
   categorias: Categoria[]
@@ -7,175 +8,207 @@ interface SeriesSidebarProps {
   onSelectCategory: (categoryId: string) => void
 }
 
+interface CategoriaProcessada {
+  category_id: string
+  label: string
+  grupo: string | null
+}
+
+interface Grupo {
+  nome: string | null
+  itens: CategoriaProcessada[]
+}
+
+function processarCategorias(categorias: Categoria[]): Grupo[] {
+  const processadas: CategoriaProcessada[] = categorias.map((cat) => {
+    const sep = cat.category_name.indexOf(' | ')
+    if (sep !== -1) {
+      return {
+        category_id: cat.category_id,
+        label: cat.category_name.slice(sep + 3).trim(),
+        grupo: cat.category_name.slice(0, sep).trim()
+      }
+    }
+    return { category_id: cat.category_id, label: cat.category_name, grupo: null }
+  })
+
+  const mapa = new Map<string, CategoriaProcessada[]>()
+  const AVULSO = '__avulso__'
+
+  for (const cat of processadas) {
+    const chave = cat.grupo ?? AVULSO
+    if (!mapa.has(chave)) mapa.set(chave, [])
+    mapa.get(chave)!.push(cat)
+  }
+
+  const grupos: Grupo[] = []
+  if (mapa.has(AVULSO)) grupos.push({ nome: null, itens: mapa.get(AVULSO)! })
+  for (const [chave, itens] of mapa.entries()) {
+    if (chave !== AVULSO) grupos.push({ nome: chave, itens })
+  }
+  return grupos
+}
+
 export function SeriesSidebar({
   categorias,
   categoriaAtiva,
   onSelectCategory
 }: SeriesSidebarProps) {
+  const grupos = useMemo(() => processarCategorias(categorias), [categorias])
+  const [colapsados, setColapsados] = useState<Set<string>>(new Set())
+
+  const toggle = (nome: string) => {
+    setColapsados((prev) => {
+      const next = new Set(prev)
+      next.has(nome) ? next.delete(nome) : next.add(nome)
+      return next
+    })
+  }
+
   return (
-    <aside
-      style={{
-        width: '320px',
-        flexShrink: 0,
+    <>
+      <style>{`
+        .sr-item {
+          position: relative;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          width: 100%;
+          padding: 9px 10px 9px 14px;
+          border: 1px solid transparent;
+          border-radius: 10px;
+          text-align: left;
+          cursor: pointer;
+          font-family: ${tokens.font};
+          font-size: 13.5px;
+          font-weight: 500;
+          line-height: 1.3;
+          transition: all 0.15s cubic-bezier(0.25, 1, 0.5, 1);
+          background: transparent;
+          color: ${tokens.textSecondary};
+        }
+        .sr-item:hover { background: rgba(255,255,255,0.04); color: ${tokens.textPrimary}; }
+        .sr-item.active {
+          background: rgba(138,43,226,0.1);
+          color: ${tokens.textPrimary};
+          font-weight: 600;
+          border-color: rgba(138,43,226,0.2);
+        }
+        .sr-item .sr-ind {
+          position: absolute; left: 0; top: 50%; transform: translateY(-50%);
+          width: 2.5px; height: 16px; border-radius: 999px;
+          background: linear-gradient(180deg, #a855f7, #6d1fc4);
+          box-shadow: 0 0 7px rgba(138,43,226,0.55);
+          opacity: 0; transition: opacity 0.2s;
+        }
+        .sr-item.active .sr-ind { opacity: 1; }
+        .sr-gh {
+          display: flex; align-items: center; justify-content: space-between;
+          padding: 14px 10px 5px; cursor: pointer; border-radius: 6px;
+          transition: background 0.15s; user-select: none;
+        }
+        .sr-gh:hover { background: rgba(255,255,255,0.02); }
+        .sr-gh-label {
+          font-family: ${tokens.font}; font-size: 10.5px; font-weight: 600;
+          letter-spacing: 0.09em; text-transform: uppercase; color: ${tokens.textTertiary};
+        }
+        .sr-ch { color: ${tokens.textTertiary}; font-size: 10px; opacity: 0.5; transition: transform 0.2s ease; }
+        .sr-ch.closed { transform: rotate(-90deg); }
+        .sr-sep { height: 1px; background: rgba(255,255,255,0.04); margin: 6px 4px 2px; }
+      `}</style>
 
-        padding: '30px 22px',
-
-        overflowY: 'auto',
-
-        background: 'rgba(255,255,255,0.025)',
-
-        backdropFilter: 'blur(32px)',
-
-        borderRight: '1px solid rgba(255,255,255,0.05)'
-      }}
-    >
-      {/* Header */}
-      <div
+      <aside
         style={{
-          marginBottom: '30px',
-          paddingLeft: '10px'
-        }}
-      >
-        <span
-          style={{
-            fontSize: '12px',
-            fontWeight: 700,
-            letterSpacing: '0.14em',
-            textTransform: 'uppercase',
-            color: tokens.textTertiary
-          }}
-        >
-          Séries
-        </span>
-      </div>
-
-      {/* Categories */}
-      <div
-        style={{
+          width: '260px',
+          flexShrink: 0,
           display: 'flex',
           flexDirection: 'column',
-          gap: '12px'
+          padding: '20px 10px',
+          overflowY: 'auto',
+          borderRight: `1px solid ${tokens.border}`,
+          backgroundColor: tokens.bg
         }}
       >
-        {categorias.map((cat) => {
-          const isActive = categoriaAtiva === String(cat.category_id)
+        {/* Header */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            padding: '0 6px',
+            marginBottom: '18px'
+          }}
+        >
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="#48484a"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <polygon points="12 2 2 7 12 12 22 7 12 2" />
+            <polyline points="2 17 12 22 22 17" />
+            <polyline points="2 12 12 17 22 12" />
+          </svg>
+          <span
+            style={{
+              fontFamily: tokens.font,
+              fontSize: '11px',
+              fontWeight: 600,
+              letterSpacing: '0.1em',
+              textTransform: 'uppercase',
+              color: tokens.textTertiary
+            }}
+          >
+            Séries
+          </span>
+        </div>
 
+        {grupos.map((grupo, gi) => {
+          const colapsado = grupo.nome ? colapsados.has(grupo.nome) : false
           return (
-            <button
-              key={cat.category_id}
-              onClick={() => onSelectCategory(String(cat.category_id))}
-              style={{
-                position: 'relative',
-
-                border: 'none',
-
-                borderRadius: '24px',
-
-                padding: '18px 20px',
-
-                textAlign: 'left',
-
-                cursor: 'pointer',
-
-                overflow: 'hidden',
-
-                background: isActive ? 'rgba(255,255,255,0.09)' : 'rgba(255,255,255,0.015)',
-
-                color: isActive ? tokens.textPrimary : tokens.textSecondary,
-
-                fontSize: '15px',
-
-                fontWeight: isActive ? 600 : 500,
-
-                transition: 'all 0.25s ease',
-
-                backdropFilter: 'blur(18px)',
-
-                boxShadow: isActive
-                  ? `
-                    inset 0 1px 0 rgba(255,255,255,0.06),
-                    0 0 0 1px rgba(255,255,255,0.05),
-                    0 10px 30px rgba(0,0,0,0.25)
-                  `
-                  : 'none'
-              }}
-              onMouseEnter={(e) => {
-                if (!isActive) {
-                  e.currentTarget.style.background = 'rgba(255,255,255,0.04)'
-                }
-              }}
-              onMouseLeave={(e) => {
-                if (!isActive) {
-                  e.currentTarget.style.background = 'rgba(255,255,255,0.015)'
-                }
-              }}
-            >
-              {/* Active Glow */}
-              {isActive && (
-                <div
-                  style={{
-                    position: 'absolute',
-                    inset: 0,
-
-                    background: `
-                      linear-gradient(
-                        135deg,
-                        rgba(255,255,255,0.05),
-                        transparent 60%
-                      )
-                    `,
-
-                    pointerEvents: 'none'
-                  }}
-                />
+            <div key={grupo.nome ?? '__avulso__'}>
+              {gi > 0 && <div className="sr-sep" />}
+              {grupo.nome && (
+                <div className="sr-gh" onClick={() => toggle(grupo.nome!)}>
+                  <span className="sr-gh-label">{grupo.nome}</span>
+                  <span className={`sr-ch${colapsado ? ' closed' : ''}`}>▾</span>
+                </div>
               )}
-
-              <div
-                style={{
-                  position: 'relative',
-
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-
-                  gap: '12px'
-                }}
-              >
-                {/* Name */}
-                <span
-                  style={{
-                    whiteSpace: 'nowrap',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis'
-                  }}
-                >
-                  {cat.category_name}
-                </span>
-
-                {/* Active Indicator */}
-                {isActive && (
-                  <div
-                    style={{
-                      width: '8px',
-                      height: '8px',
-
-                      borderRadius: '999px',
-
-                      background: tokens.textPrimary,
-
-                      boxShadow: `
-                        0 0 12px rgba(255,255,255,0.5)
-                      `,
-
-                      flexShrink: 0
-                    }}
-                  />
-                )}
-              </div>
-            </button>
+              {!colapsado && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                  {grupo.itens.map((cat) => {
+                    const isActive = categoriaAtiva === cat.category_id
+                    return (
+                      <button
+                        key={cat.category_id}
+                        className={`sr-item${isActive ? ' active' : ''}`}
+                        onClick={() => onSelectCategory(cat.category_id)}
+                        style={{ paddingLeft: grupo.nome ? '22px' : '14px' }}
+                      >
+                        <div className="sr-ind" />
+                        <span
+                          style={{
+                            flex: 1,
+                            whiteSpace: 'nowrap',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis'
+                          }}
+                        >
+                          {cat.label}
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
           )
         })}
-      </div>
-    </aside>
+      </aside>
+    </>
   )
 }

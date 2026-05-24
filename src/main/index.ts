@@ -49,6 +49,16 @@ function buildApiUrl(
   return `${base}?${params.toString()}`
 }
 
+/** Chave única por usuário + ação — impede cache cruzado entre contas */
+function cacheKey(credentials: Credenciais, action: string): string {
+  return `${credentials.serverUrl}::${credentials.username}::${action}`
+}
+
+// ─── Cache em memória RAM ─────────────────────────────────────────────────────
+
+const ramCache = new Map<string, NormalizedItem[]>()
+const fetchPromises = new Map<string, Promise<NormalizedItem[]>>()
+
 // ─── Window ───────────────────────────────────────────────────────────────────
 
 function createWindow(): void {
@@ -116,60 +126,85 @@ app.whenReady().then(() => {
   ipcMain.handle(
     'fetch-catalog',
     async (_, request: { credentials: Credenciais; action: string; category_id?: string }) => {
+      const { credentials, action, category_id } = request
+      const key = cacheKey(credentials, action)
+
       try {
-        const { credentials, action, category_id } = request
-        const url = buildApiUrl(credentials, action)
-        const response = await axios.get(url, { responseType: 'json', timeout: 20000 })
+        if (!ramCache.has(key)) {
+          if (!fetchPromises.has(key)) {
+            const promise = (async () => {
+              const url = buildApiUrl(credentials, action)
+              const response = await axios.get(url, { responseType: 'json', timeout: 30000 })
 
-        const normalizedData: NormalizedItem[] = response.data
-          .map((item: XtreamRawItem) => {
-            switch (action) {
-              case 'get_live_streams':
-                return {
-                  id: item.stream_id,
-                  nome: item.name?.trim() || 'Sem Nome',
-                  capa: item.stream_icon || '',
-                  tipo: 'live',
-                  extensao: '',
-                  categoria_id: String(item.category_id ?? '0')
-                }
-              case 'get_vod_streams':
-                return {
-                  id: item.stream_id,
-                  nome: item.name?.trim() || 'Sem Nome',
-                  capa: item.stream_icon || '',
-                  tipo: 'vod',
-                  extensao: item.container_extension || 'mp4',
-                  categoria_id: String(item.category_id ?? '0')
-                }
-              case 'get_series':
-                return {
-                  id: item.series_id,
-                  nome: item.name?.trim() || 'Sem Nome',
-                  capa: item.cover || '',
-                  tipo: 'series',
-                  extensao: '',
-                  categoria_id: String(item.category_id ?? '0')
-                }
-              default:
-                return null
-            }
-          })
-          .filter(Boolean)
+              const normalizedData: NormalizedItem[] = response.data
+                .map((item: XtreamRawItem) => {
+                  switch (action) {
+                    case 'get_live_streams':
+                      return {
+                        id: item.stream_id,
+                        nome: item.name?.trim() || 'Sem Nome',
+                        capa: item.stream_icon || '',
+                        tipo: 'live',
+                        extensao: '',
+                        categoria_id: String(item.category_id ?? '0')
+                      }
+                    case 'get_vod_streams':
+                      return {
+                        id: item.stream_id,
+                        nome: item.name?.trim() || 'Sem Nome',
+                        capa: item.stream_icon || '',
+                        tipo: 'vod',
+                        extensao: item.container_extension || 'mp4',
+                        categoria_id: String(item.category_id ?? '0')
+                      }
+                    case 'get_series':
+                      return {
+                        id: item.series_id,
+                        nome: item.name?.trim() || 'Sem Nome',
+                        capa: item.cover || '',
+                        tipo: 'series',
+                        extensao: '',
+                        categoria_id: String(item.category_id ?? '0')
+                      }
+                    default:
+                      return null
+                  }
+                })
+                .filter(Boolean)
 
-        const cachePath = join(app.getPath('userData'), `${action}_cache.json`)
-        fs.writeFileSync(cachePath, JSON.stringify(normalizedData))
+              ramCache.set(key, normalizedData)
+              // Limpa a promise após resolver — libera memória e permite retry futuro
+              fetchPromises.delete(key)
+              return normalizedData
+            })()
 
-        const result = category_id
-          ? normalizedData.filter((m) => m.categoria_id === category_id)
-          : normalizedData
+            fetchPromises.set(key, promise)
+          }
 
-        return result.slice(0, 50)
+          await fetchPromises.get(key)!
+        }
+
+        const allData = ramCache.get(key)!
+
+        const result =
+          category_id && category_id !== ''
+            ? allData.filter((m) => m.categoria_id === category_id)
+            : allData
+
+        return result
       } catch (error: unknown) {
+        fetchPromises.delete(key)
         return { error: error instanceof Error ? error.message : 'Erro ao buscar catálogo.' }
       }
     }
   )
+
+  // ── Handler: limpar cache (chamado no logout) ─────────────────────────────
+
+  ipcMain.handle('clear-cache', () => {
+    ramCache.clear()
+    fetchPromises.clear()
+  })
 
   // ── Handler: info da série ───────────────────────────────────────────────
 

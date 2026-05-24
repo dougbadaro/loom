@@ -1,12 +1,9 @@
 import { useEffect, useState } from 'react'
-
 import { Categoria, Credenciais, Midia, SeriesData, TipoCatalogo } from '../../types'
-
 import { tokens } from '@renderer/styles/tokens'
 
 import { PlayerScreen } from '../Player/PlayerScreen'
 import { SeriesScreen } from '../Series/SeriesScreen'
-
 import { ErrorMsg } from '@renderer/components/ui/ErrorMsg'
 import { Spinner } from '@renderer/components/ui/Spinner'
 
@@ -15,8 +12,6 @@ import { LiveLayout } from './components/layouts/LiveLayout'
 import { MoviesLayout } from './components/layouts/MoviesLayout'
 import { SeriesLayout } from './components/layouts/SeriesLayout'
 import { LiveSidebar } from './components/sidebars/LiveSidebar'
-import { MoviesSidebar } from './components/sidebars/MoviesSidebar'
-import { SeriesSidebar } from './components/sidebars/SeriesSidebar'
 
 interface CatalogScreenProps {
   credentials: Credenciais
@@ -37,6 +32,11 @@ const contentMap = {
   series: 'get_series'
 } as const
 
+// Type guard para respostas com erro
+function hasError(data: unknown): data is { error: string } {
+  return typeof data === 'object' && data !== null && 'error' in data
+}
+
 export function CatalogScreen({
   credentials,
   initialTab = 'vod',
@@ -44,46 +44,38 @@ export function CatalogScreen({
   onLogout
 }: CatalogScreenProps) {
   const [tipoCatalogo, setTipoCatalogo] = useState<TipoCatalogo>(initialTab)
-
   const [categorias, setCategorias] = useState<Categoria[]>([])
-
   const [categoriaAtiva, setCategoriaAtiva] = useState<string | null>(null)
-
   const [movies, setMovies] = useState<Midia[]>([])
-
   const [activeSeriesData, setActiveSeriesData] = useState<SeriesData | null>(null)
-
   const [activeVideo, setActiveVideo] = useState<string | null>(null)
-
   const [loading, setLoading] = useState(false)
-
   const [error, setError] = useState<string | null>(null)
 
-  // =========================
-  // Load Categories
-  // =========================
+  const isNetflixStyle = tipoCatalogo === 'vod' || tipoCatalogo === 'series'
+
+  const serverUrl = credentials.serverUrl
+  const username = credentials.username
+  const password = credentials.password
+
+  // ── Load Categories ────────────────────────────────────────────────────────
 
   useEffect(() => {
     const load = async () => {
       try {
         setError(null)
-
-        const data = (await window.api.fetchCategories({
-          credentials,
+        const data = await window.api.fetchCategories({
+          credentials: { serverUrl, username, password },
           action: actionMap[tipoCatalogo]
-        })) as Categoria[] & {
-          error?: string
-        }
+        })
 
-        if (data.error) {
+        if (hasError(data)) {
           setError(data.error)
           return
         }
 
         setCategorias(data)
-
         setCategoriaAtiva(data.length > 0 ? String(data[0].category_id) : null)
-
         setMovies([])
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Erro ao carregar categorias')
@@ -91,146 +83,80 @@ export function CatalogScreen({
     }
 
     load()
-  }, [tipoCatalogo, credentials])
+  }, [tipoCatalogo, serverUrl, username, password])
 
-  // =========================
-  // Load Catalog
-  // =========================
+  // ── Load Catalog (só para Live) ────────────────────────────────────────────
 
   useEffect(() => {
+    if (isNetflixStyle) return
     if (!categoriaAtiva) return
 
-    const load = async () => {
-      setLoading(true)
-      setError(null)
+    let montado = true
 
+    const load = async () => {
+      setError(null)
       try {
-        const data = (await window.api.fetchCatalog({
-          credentials,
+        const data = await window.api.fetchCatalog({
+          credentials: { serverUrl, username, password },
           action: contentMap[tipoCatalogo],
           category_id: categoriaAtiva
-        })) as Midia[] & {
-          error?: string
-        }
+        })
 
-        if (data.error) {
-          setError(data.error)
-        } else {
-          setMovies(data)
-        }
+        if (!montado) return
+
+        if (hasError(data)) setError(data.error)
+        else setMovies(data)
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Erro ao carregar catálogo')
+        if (montado) setError(err instanceof Error ? err.message : 'Erro ao carregar catálogo')
       } finally {
-        setLoading(false)
+        if (montado) setLoading(false)
       }
     }
 
     load()
-  }, [categoriaAtiva, tipoCatalogo, credentials])
+    return () => {
+      montado = false
+    }
+  }, [categoriaAtiva, tipoCatalogo, serverUrl, username, password, isNetflixStyle])
 
-  // =========================
-  // Handle Item Click
-  // =========================
+  // loading para live: derivado, sem setState no efeito
+  const isLiveLoading =
+    tipoCatalogo === 'live' && categoriaAtiva !== null && movies.length === 0 && !error
+
+  // ── Handle Item Click ──────────────────────────────────────────────────────
 
   const handleItemClick = async (movie: Midia) => {
     if (movie.tipo === 'series') {
       setLoading(true)
-
       try {
-        const data = (await window.api.fetchSeriesInfo({
-          credentials,
+        const data = await window.api.fetchSeriesInfo({
+          credentials: { serverUrl, username, password },
           series_id: movie.id
-        })) as SeriesData & {
-          error?: string
-        }
+        })
 
-        if (data.error) {
-          setError(data.error)
-        } else {
-          setActiveSeriesData(data)
-        }
+        if (hasError(data)) setError(data.error)
+        else setActiveSeriesData(data as SeriesData)
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Erro ao buscar série')
       } finally {
         setLoading(false)
       }
-
       return
     }
 
     const url =
       movie.tipo === 'live'
-        ? `${credentials.serverUrl}/live/${credentials.username}/${credentials.password}/${movie.id}.m3u8`
-        : `${credentials.serverUrl}/movie/${credentials.username}/${credentials.password}/${movie.id}.${movie.extensao}`
+        ? `${serverUrl}/live/${username}/${password}/${movie.id}.m3u8`
+        : `${serverUrl}/movie/${username}/${password}/${movie.id}.${movie.extensao}`
 
     setActiveVideo(url)
   }
 
-  // =========================
-  // Render Sidebar
-  // =========================
-
-  const renderSidebar = () => {
-    switch (tipoCatalogo) {
-      case 'live':
-        return (
-          <LiveSidebar
-            categorias={categorias}
-            categoriaAtiva={categoriaAtiva}
-            onSelectCategory={setCategoriaAtiva}
-          />
-        )
-
-      case 'series':
-        return (
-          <SeriesSidebar
-            categorias={categorias}
-            categoriaAtiva={categoriaAtiva}
-            onSelectCategory={setCategoriaAtiva}
-          />
-        )
-
-      case 'vod':
-      default:
-        return (
-          <MoviesSidebar
-            categorias={categorias}
-            categoriaAtiva={categoriaAtiva}
-            onSelectCategory={setCategoriaAtiva}
-          />
-        )
-    }
-  }
-
-  // =========================
-  // Render Layout
-  // =========================
-
-  const renderContent = () => {
-    switch (tipoCatalogo) {
-      case 'live':
-        return <LiveLayout channels={movies} onItemClick={handleItemClick} />
-
-      case 'series':
-        return <SeriesLayout series={movies} onItemClick={handleItemClick} />
-
-      case 'vod':
-      default:
-        return <MoviesLayout movies={movies} onItemClick={handleItemClick} />
-    }
-  }
-
-  // =========================
-  // Player Screen
-  // =========================
+  // ── Overlays ───────────────────────────────────────────────────────────────
 
   if (activeVideo) {
     return <PlayerScreen url={activeVideo} onBack={() => setActiveVideo(null)} />
   }
-
-  // =========================
-  // Series Screen
-  // =========================
 
   if (activeSeriesData) {
     return (
@@ -243,36 +169,56 @@ export function CatalogScreen({
     )
   }
 
-  // =========================
-  // Main Screen
-  // =========================
+  // ── Render ─────────────────────────────────────────────────────────────────
+
+  const renderSidebar = () => {
+    if (tipoCatalogo !== 'live') return null
+    return (
+      <LiveSidebar
+        categorias={categorias}
+        categoriaAtiva={categoriaAtiva}
+        onSelectCategory={setCategoriaAtiva}
+      />
+    )
+  }
+
+  const renderContent = () => {
+    switch (tipoCatalogo) {
+      case 'live':
+        return <LiveLayout channels={movies} onItemClick={handleItemClick} />
+      case 'series':
+        return (
+          <SeriesLayout
+            credentials={credentials}
+            categorias={categorias}
+            onItemClick={handleItemClick}
+          />
+        )
+      case 'vod':
+      default:
+        return (
+          <MoviesLayout
+            credentials={credentials}
+            categorias={categorias}
+            onPlay={handleItemClick}
+          />
+        )
+    }
+  }
 
   return (
     <div
       style={{
         display: 'flex',
         flexDirection: 'column',
-
         height: '100vh',
         width: '100vw',
-
         overflow: 'hidden',
-
         fontFamily: tokens.font,
-
         color: tokens.textPrimary,
-
-        background: `
-          radial-gradient(
-            circle at top,
-            rgba(255,255,255,0.03),
-            transparent 40%
-          ),
-          ${tokens.bg}
-        `
+        background: `radial-gradient(circle at top, rgba(255,255,255,0.03), transparent 40%), ${tokens.bg}`
       }}
     >
-      {/* Header */}
       <CatalogHeader
         tipoCatalogo={tipoCatalogo}
         onChangeTab={(tipo) => {
@@ -283,36 +229,24 @@ export function CatalogScreen({
         onLogout={onLogout}
       />
 
-      {/* Body */}
-      <div
-        style={{
-          display: 'flex',
-          flex: 1,
-          overflow: 'hidden'
-        }}
-      >
-        {/* Sidebar */}
+      <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
         {renderSidebar()}
 
-        {/* Content */}
         <main
           style={{
             flex: 1,
-
-            padding: '34px 38px',
-
+            padding: isNetflixStyle ? '0' : '34px 38px',
             overflowY: 'auto',
-
             background: 'transparent'
           }}
         >
           {error && (
-            <div style={{ marginBottom: '24px' }}>
+            <div style={{ marginBottom: '24px', padding: isNetflixStyle ? '0 36px' : '0' }}>
               <ErrorMsg msg={error} />
             </div>
           )}
 
-          {loading ? <Spinner /> : renderContent()}
+          {(isLiveLoading || loading) && tipoCatalogo === 'live' ? <Spinner /> : renderContent()}
         </main>
       </div>
     </div>

@@ -61,12 +61,12 @@ export function CatalogHeader({ tipoCatalogo, onChangeTab, onBack, onLogout }: C
             onClick={() => onChangeTab(tipo)}
             style={{
               padding: '9px 26px',
-              background: tipoCatalogo === tipo ? 'rgba(255,255,255,0.08)' : 'transparent',
+              background: tipoCatalogo === tipo ? 'rgba(138,43,226,0.2)' : 'transparent',
               color: tipoCatalogo === tipo ? tokens.textPrimary : tokens.textSecondary,
               border: 'none',
               borderRadius: tokens.radius.md,
               fontSize: '14px',
-              fontWeight: 600,
+              fontWeight: tipoCatalogo === tipo ? 600 : 500,
               cursor: 'pointer',
               fontFamily: tokens.font,
               transition: 'all 0.2s ease'

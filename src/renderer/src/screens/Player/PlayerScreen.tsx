@@ -273,10 +273,21 @@ export function PlayerScreen({ url, title, onBack }: PlayerScreenProps) {
 
   // ── Controls ─────────────────────────────────────────────────────────────────
 
-  const togglePlay = () => {
+  const togglePlay = (e?: React.MouseEvent) => {
+    e?.stopPropagation()
+
     const video = videoRef.current
+
     if (!video) return
-    playing ? video.pause() : video.play()
+
+    if (video.paused) {
+      video.play().catch((err) => {
+        console.error('PLAY ERROR:', err)
+      })
+    } else {
+      video.pause()
+    }
+
     resetHideTimer()
   }
 
@@ -409,7 +420,10 @@ export function PlayerScreen({ url, title, onBack }: PlayerScreenProps) {
       <div
         ref={containerRef}
         onMouseMove={resetHideTimer}
-        onClick={togglePlay}
+        onClick={(e) => {
+          e.stopPropagation()
+          togglePlay(e)
+        }}
         style={{
           position: 'relative',
           backgroundColor: '#000',
@@ -504,7 +518,6 @@ export function PlayerScreen({ url, title, onBack }: PlayerScreenProps) {
 
         {/* Controls overlay */}
         <div
-          onClick={(e) => e.stopPropagation()}
           style={{
             position: 'absolute',
             inset: 0,
@@ -521,7 +534,13 @@ export function PlayerScreen({ url, title, onBack }: PlayerScreenProps) {
         >
           {/* Top bar */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '20px 28px' }}>
-            <button className="ctrl-btn" onClick={onBack}>
+            <button
+              className="ctrl-btn"
+              onClick={(e) => {
+                e.stopPropagation()
+                onBack()
+              }}
+            >
               <svg
                 width="20"
                 height="20"
@@ -641,6 +660,8 @@ export function PlayerScreen({ url, title, onBack }: PlayerScreenProps) {
                     step={0.5}
                     value={currentTime}
                     onChange={handleSeek}
+                    onClick={(e) => e.stopPropagation()}
+                    onMouseDown={(e) => e.stopPropagation()}
                     className="player-range"
                     style={{
                       position: 'absolute',
@@ -666,7 +687,13 @@ export function PlayerScreen({ url, title, onBack }: PlayerScreenProps) {
             {/* Buttons row */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
               {/* Play/Pause */}
-              <button className="ctrl-btn" onClick={togglePlay}>
+              <button
+                className="ctrl-btn"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  togglePlay(e)
+                }}
+              >
                 {playing ? (
                   <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
                     <rect x="6" y="4" width="4" height="16" rx="1" />
@@ -682,7 +709,13 @@ export function PlayerScreen({ url, title, onBack }: PlayerScreenProps) {
               {/* Skip -10s / +10s — só VOD */}
               {!live && (
                 <>
-                  <button className="ctrl-btn" onClick={() => skipSeconds(-10)}>
+                  <button
+                    className="ctrl-btn"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      skipSeconds(-10)
+                    }}
+                  >
                     <svg
                       width="20"
                       height="20"
@@ -707,7 +740,13 @@ export function PlayerScreen({ url, title, onBack }: PlayerScreenProps) {
                       </text>
                     </svg>
                   </button>
-                  <button className="ctrl-btn" onClick={() => skipSeconds(10)}>
+                  <button
+                    className="ctrl-btn"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      skipSeconds(10)
+                    }}
+                  >
                     <svg
                       width="20"
                       height="20"
@@ -736,7 +775,13 @@ export function PlayerScreen({ url, title, onBack }: PlayerScreenProps) {
               )}
 
               {/* Volume */}
-              <button className="ctrl-btn" onClick={toggleMute}>
+              <button
+                className="ctrl-btn"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  toggleMute()
+                }}
+              >
                 {muted || volume === 0 ? (
                   <svg
                     width="20"
@@ -787,6 +832,8 @@ export function PlayerScreen({ url, title, onBack }: PlayerScreenProps) {
                 step={0.05}
                 value={muted ? 0 : volume}
                 onChange={handleVolume}
+                onClick={(e) => e.stopPropagation()}
+                onMouseDown={(e) => e.stopPropagation()}
                 className="player-range"
                 style={{
                   width: '80px',
@@ -798,7 +845,13 @@ export function PlayerScreen({ url, title, onBack }: PlayerScreenProps) {
               <div style={{ flex: 1 }} />
 
               {/* Fullscreen */}
-              <button className="ctrl-btn" onClick={toggleFullscreen}>
+              <button
+                className="ctrl-btn"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  toggleFullscreen()
+                }}
+              >
                 {isFullscreen ? (
                   <svg
                     width="20"
@@ -838,7 +891,10 @@ export function PlayerScreen({ url, title, onBack }: PlayerScreenProps) {
         {/* Click to play/pause (center) — indicator */}
         {!buffering && !hlsError && (
           <div
-            onClick={togglePlay}
+            onClick={(e) => {
+              e.stopPropagation()
+              togglePlay(e)
+            }}
             style={{
               position: 'absolute',
               inset: 0,

@@ -5,12 +5,16 @@ interface MovieCardProps {
   movie: Midia
   onClick: (movie: Midia) => void
   rank?: number
+  /** Progresso de 0 a 1 — exibe barra na base do poster */
+  progress?: number
 }
 
-export function MovieCard({ movie, onClick, rank }: MovieCardProps) {
+export function MovieCard({ movie, onClick, rank, progress }: MovieCardProps) {
   const displayName = movie.nome.includes(' | ')
     ? movie.nome.split(' | ').slice(1).join(' | ').trim()
     : movie.nome
+
+  const progressPercent = progress !== undefined ? Math.min(1, Math.max(0, progress)) * 100 : null
 
   return (
     <>
@@ -30,12 +34,11 @@ export function MovieCard({ movie, onClick, rank }: MovieCardProps) {
           overflow: hidden;
           background: ${tokens.surface};
           position: relative;
-          transition: transform 0.3s cubic-bezier(0.25, 1, 0.5, 1),
-                      box-shadow 0.3s ease;
+          transition: transform 0.3s cubic-bezier(0.25, 1, 0.5, 1), box-shadow 0.3s ease;
           z-index: 1;
         }
         .mv-card-wrap:hover .mv-card-poster {
-          transform: scale(1.06);
+          transform: scale(1.06) translateY(-3px);
           z-index: 10;
           box-shadow: 0 12px 28px rgba(0,0,0,0.8);
         }
@@ -75,10 +78,9 @@ export function MovieCard({ movie, onClick, rank }: MovieCardProps) {
           padding: 0 2px;
           transition: color 0.2s;
           line-height: 1.3;
+          margin: 0;
         }
-        .mv-card-wrap:hover .mv-title {
-          color: ${tokens.textPrimary};
-        }
+        .mv-card-wrap:hover .mv-title { color: ${tokens.textPrimary}; }
       `}</style>
 
       <div className="mv-card-wrap" onClick={() => onClick(movie)}>
@@ -110,6 +112,30 @@ export function MovieCard({ movie, onClick, rank }: MovieCardProps) {
                 }}
               >
                 {displayName.charAt(0).toUpperCase()}
+              </div>
+            )}
+
+            {/* Barra de progresso */}
+            {progressPercent !== null && (
+              <div
+                style={{
+                  position: 'absolute',
+                  bottom: 0,
+                  left: 0,
+                  right: 0,
+                  height: '3px',
+                  background: 'rgba(255,255,255,0.15)'
+                }}
+              >
+                <div
+                  style={{
+                    height: '100%',
+                    width: `${progressPercent}%`,
+                    background: tokens.accent,
+                    borderRadius: '0 2px 2px 0',
+                    transition: 'width 0.3s ease'
+                  }}
+                />
               </div>
             )}
           </div>

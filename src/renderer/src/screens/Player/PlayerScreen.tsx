@@ -1,16 +1,21 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import Hls from 'hls.js'
 import { tokens } from '@renderer/styles/tokens'
+import { EpisodeContext } from '../Series/EpisodeContext'
 
 interface PlayerScreenProps {
   url: string
   title?: string
+  startTime?: number
   onBack: () => void
+  onProgressUpdate?: (currentTime: number, duration: number) => void
+  /** Contexto de série — habilita botão de próximo episódio */
+  episodeContext?: EpisodeContext
+  /** Chamado ao avançar para o próximo episódio */
+  onNextEpisode?: (url: string, context: EpisodeContext) => void
 }
 
 const isLive = (url: string) => url.includes('.m3u8') || url.includes('/live/')
-
-// ─── HLS Config ───────────────────────────────────────────────────────────────
 
 const HLS_VOD_CONFIG: Partial<Hls['config']> = {
   enableWorker: true,
@@ -21,21 +26,16 @@ const HLS_VOD_CONFIG: Partial<Hls['config']> = {
 const HLS_LIVE_CONFIG: Partial<Hls['config']> = {
   enableWorker: true,
   lowLatencyMode: true,
-  // Buffer mínimo para live — reduz latência e evita stall
   liveBackBufferLength: 10,
   liveSyncDurationCount: 3,
   liveMaxLatencyDurationCount: 6,
-  // Recuperação agressiva de erro
   fragLoadingMaxRetry: 6,
   fragLoadingRetryDelay: 500,
   manifestLoadingMaxRetry: 4,
   manifestLoadingRetryDelay: 500,
   levelLoadingMaxRetry: 4,
-  // Abandona fragmento lento antes de travar
   fragLoadingTimeOut: 8000
 }
-
-// ─── Formatação de tempo ──────────────────────────────────────────────────────
 
 function formatTime(s: number): string {
   if (!isFinite(s)) return '0:00'
@@ -44,13 +44,20 @@ function formatTime(s: number): string {
   return `${m}:${sec.toString().padStart(2, '0')}`
 }
 
-// ─── PlayerScreen ─────────────────────────────────────────────────────────────
-
-export function PlayerScreen({ url, title, onBack }: PlayerScreenProps) {
+export function PlayerScreen({
+  url,
+  title,
+  startTime = 0,
+  onBack,
+  onProgressUpdate,
+  episodeContext,
+  onNextEpisode
+}: PlayerScreenProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const hlsRef = useRef<Hls | null>(null)
+  const lastSavedTime = useRef(0)
 
   const live = isLive(url)
 
@@ -64,74 +71,74 @@ export function PlayerScreen({ url, title, onBack }: PlayerScreenProps) {
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [hlsError, setHlsError] = useState<string | null>(null)
   const [quality, setQuality] = useState<string>('AUTO')
+  /** Mostra overlay "Próximo episódio" nos últimos 30s */
+  const [showNextOverlay, setShowNextOverlay] = useState(false)
+
+  // Episódio seguinte — calculado a partir do contexto
+  const nextEpisode = episodeContext
+    ? (episodeContext.episodeList[episodeContext.currentIndex + 1] ?? null)
+    : null
+
+  const handleNextEpisode = useCallback(() => {
+    if (!nextEpisode || !episodeContext || !onNextEpisode) return
+    const nextUrl = `${episodeContext.baseUrl}${nextEpisode.id}.${nextEpisode.container_extension}`
+    const nextContext: EpisodeContext = {
+      ...episodeContext,
+      episodeId: nextEpisode.id,
+      episodeNum: nextEpisode.episode_num,
+      episodeTitle: nextEpisode.title || 'Sem Título',
+      container_extension: nextEpisode.container_extension,
+      currentIndex: episodeContext.currentIndex + 1
+    }
+    onNextEpisode(nextUrl, nextContext)
+  }, [nextEpisode, episodeContext, onNextEpisode])
 
   // ── HLS setup ───────────────────────────────────────────────────────────────
 
   useEffect(() => {
     const video = videoRef.current
-
     if (!video) return
 
     setBuffering(true)
     setHlsError(null)
+    setShowNextOverlay(false)
+    lastSavedTime.current = 0
 
-    // Limpa player antigo
     if (hlsRef.current) {
       hlsRef.current.destroy()
       hlsRef.current = null
     }
 
-    // Detecta HLS
     const isHls = url.includes('.m3u8') || url.includes('/live/') || url.includes('/play/live.php')
-
-    console.log('PLAYER URL:', url)
-    console.log('IS HLS:', isHls)
-
-    // ─────────────────────────────────────────────
-    // HLS STREAM
-    // ─────────────────────────────────────────────
 
     if (isHls && Hls.isSupported()) {
       const config = live ? HLS_LIVE_CONFIG : HLS_VOD_CONFIG
-
       const hls = new Hls(config)
-
       hlsRef.current = hls
 
       hls.loadSource(url)
       hls.attachMedia(video)
 
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
-        console.log('HLS MANIFEST PARSED')
-
-        video.play().catch((err) => {
-          console.error('PLAY ERROR:', err)
-        })
+        if (startTime > 0) video.currentTime = startTime
+        video.play().catch(() => {})
       })
 
       hls.on(Hls.Events.LEVEL_SWITCHED, (_, data) => {
         const level = hls.levels[data.level]
-
         setQuality(level?.height ? `${level.height}p` : 'AUTO')
       })
 
       hls.on(Hls.Events.ERROR, (_, data) => {
-        console.error('HLS ERROR:', data)
-
         if (data.fatal) {
           switch (data.type) {
             case Hls.ErrorTypes.NETWORK_ERROR:
-              console.log('RECOVERING NETWORK ERROR')
               hls.startLoad()
               break
-
             case Hls.ErrorTypes.MEDIA_ERROR:
-              console.log('RECOVERING MEDIA ERROR')
               hls.recoverMediaError()
               break
-
             default:
-              console.log('FATAL HLS ERROR')
               setHlsError('Erro ao carregar stream.')
               break
           }
@@ -144,45 +151,22 @@ export function PlayerScreen({ url, title, onBack }: PlayerScreenProps) {
       }
     }
 
-    // ─────────────────────────────────────────────
-    // MP4 / FILMES / VOD
-    // ─────────────────────────────────────────────
-
-    console.log('USING NATIVE VIDEO PLAYER')
-
     video.src = url
 
     const onLoadedMetadata = () => {
-      console.log('VIDEO METADATA LOADED')
-
-      video
-        .play()
-        .then(() => {
-          console.log('VIDEO PLAYING')
-        })
-        .catch((err) => {
-          console.error('VIDEO PLAY ERROR:', err)
-        })
+      if (startTime > 0) video.currentTime = startTime
+      video.play().catch(() => {})
     }
-
     const onError = () => {
-      console.error('VIDEO ERROR:', video.error)
-
       setHlsError('Erro ao reproduzir vídeo.')
     }
-
     const onCanPlay = () => {
-      console.log('VIDEO CAN PLAY')
       setBuffering(false)
     }
-
     const onWaiting = () => {
-      console.log('VIDEO BUFFERING')
       setBuffering(true)
     }
-
     const onPlaying = () => {
-      console.log('VIDEO RESUMED')
       setBuffering(false)
     }
 
@@ -194,17 +178,15 @@ export function PlayerScreen({ url, title, onBack }: PlayerScreenProps) {
 
     return () => {
       video.pause()
-
       video.removeEventListener('loadedmetadata', onLoadedMetadata)
       video.removeEventListener('error', onError)
       video.removeEventListener('canplay', onCanPlay)
       video.removeEventListener('waiting', onWaiting)
       video.removeEventListener('playing', onPlaying)
-
       video.removeAttribute('src')
       video.load()
     }
-  }, [url, live])
+  }, [url, live, startTime])
 
   // ── Video event listeners ────────────────────────────────────────────────────
 
@@ -213,8 +195,35 @@ export function PlayerScreen({ url, title, onBack }: PlayerScreenProps) {
     if (!video) return
 
     const onPlay = () => setPlaying(true)
-    const onPause = () => setPlaying(false)
-    const onTimeUpdate = () => setCurrentTime(video.currentTime)
+
+    const onPause = () => {
+      setPlaying(false)
+      if (onProgressUpdate && video.duration > 0) {
+        onProgressUpdate(video.currentTime, video.duration)
+        lastSavedTime.current = video.currentTime
+      }
+    }
+
+    const onTimeUpdate = () => {
+      setCurrentTime(video.currentTime)
+
+      // Salva a cada 10s
+      if (
+        onProgressUpdate &&
+        video.duration > 0 &&
+        Math.abs(video.currentTime - lastSavedTime.current) >= 10
+      ) {
+        onProgressUpdate(video.currentTime, video.duration)
+        lastSavedTime.current = video.currentTime
+      }
+
+      // Mostra overlay "próximo episódio" nos últimos 30s
+      if (nextEpisode && video.duration > 0 && !live) {
+        const remaining = video.duration - video.currentTime
+        setShowNextOverlay(remaining <= 30 && remaining > 0)
+      }
+    }
+
     const onDurationChange = () => setDuration(video.duration)
     const onWaiting = () => setBuffering(true)
     const onPlaying = () => setBuffering(false)
@@ -222,6 +231,11 @@ export function PlayerScreen({ url, title, onBack }: PlayerScreenProps) {
     const onVolumeChange = () => {
       setVolume(video.volume)
       setMuted(video.muted)
+    }
+
+    // Avança automaticamente ao terminar
+    const onEnded = () => {
+      if (nextEpisode && onNextEpisode) handleNextEpisode()
     }
 
     video.addEventListener('play', onPlay)
@@ -232,6 +246,7 @@ export function PlayerScreen({ url, title, onBack }: PlayerScreenProps) {
     video.addEventListener('playing', onPlaying)
     video.addEventListener('canplay', onCanPlay)
     video.addEventListener('volumechange', onVolumeChange)
+    video.addEventListener('ended', onEnded)
 
     return () => {
       video.removeEventListener('play', onPlay)
@@ -242,10 +257,11 @@ export function PlayerScreen({ url, title, onBack }: PlayerScreenProps) {
       video.removeEventListener('playing', onPlaying)
       video.removeEventListener('canplay', onCanPlay)
       video.removeEventListener('volumechange', onVolumeChange)
+      video.removeEventListener('ended', onEnded)
     }
-  }, [])
+  }, [onProgressUpdate, nextEpisode, onNextEpisode, handleNextEpisode, live])
 
-  // ── Fullscreen listener ──────────────────────────────────────────────────────
+  // ── Fullscreen ───────────────────────────────────────────────────────────────
 
   useEffect(() => {
     const onFsChange = () => setIsFullscreen(!!document.fullscreenElement)
@@ -253,9 +269,8 @@ export function PlayerScreen({ url, title, onBack }: PlayerScreenProps) {
     return () => document.removeEventListener('fullscreenchange', onFsChange)
   }, [])
 
-  // ── Auto-hide controls ───────────────────────────────────────────────────────
+  // ── Auto-hide controls ────────────────────────────────────────────────────────
 
-  // Mostra controles e agenda o hide — chamado em onMouseMove e em togglePlay
   const resetHideTimer = useCallback(() => {
     setControlsVisible(true)
     if (hideTimer.current) clearTimeout(hideTimer.current)
@@ -264,30 +279,20 @@ export function PlayerScreen({ url, title, onBack }: PlayerScreenProps) {
     }, 3000)
   }, [])
 
-  // Limpa o timer quando o componente desmonta
   useEffect(() => {
     return () => {
       if (hideTimer.current) clearTimeout(hideTimer.current)
     }
   }, [])
 
-  // ── Controls ─────────────────────────────────────────────────────────────────
+  // ── Controls ──────────────────────────────────────────────────────────────────
 
   const togglePlay = (e?: React.MouseEvent) => {
     e?.stopPropagation()
-
     const video = videoRef.current
-
     if (!video) return
-
-    if (video.paused) {
-      video.play().catch((err) => {
-        console.error('PLAY ERROR:', err)
-      })
-    } else {
-      video.pause()
-    }
-
+    if (video.paused) video.play().catch(() => {})
+    else video.pause()
     resetHideTimer()
   }
 
@@ -314,11 +319,8 @@ export function PlayerScreen({ url, title, onBack }: PlayerScreenProps) {
   }
 
   const toggleFullscreen = () => {
-    if (!document.fullscreenElement) {
-      containerRef.current?.requestFullscreen()
-    } else {
-      document.exitFullscreen()
-    }
+    if (!document.fullscreenElement) containerRef.current?.requestFullscreen()
+    else document.exitFullscreen()
   }
 
   const skipSeconds = (s: number) => {
@@ -327,36 +329,54 @@ export function PlayerScreen({ url, title, onBack }: PlayerScreenProps) {
     video.currentTime = Math.min(Math.max(0, video.currentTime + s), duration)
   }
 
-  // ── Keyboard shortcuts ────────────────────────────────────────────────────────
+  // ── Keyboard ──────────────────────────────────────────────────────────────────
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      const video = videoRef.current
       switch (e.code) {
         case 'Space':
           e.preventDefault()
-          togglePlay()
+          if (video) {
+            if (video.paused) video.play().catch(() => {})
+            else video.pause()
+          }
           break
         case 'ArrowLeft':
-          skipSeconds(-10)
+          if (video) video.currentTime = Math.max(0, video.currentTime - 10)
           break
         case 'ArrowRight':
-          skipSeconds(10)
+          if (video) video.currentTime = Math.min(video.duration || 0, video.currentTime + 10)
           break
-        case 'ArrowUp': {
-          const v = videoRef.current
-          if (v) v.volume = Math.min(1, v.volume + 0.1)
+        case 'ArrowUp':
+          if (video) video.volume = Math.min(1, video.volume + 0.1)
           break
-        }
-        case 'ArrowDown': {
-          const v = videoRef.current
-          if (v) v.volume = Math.max(0, v.volume - 0.1)
+        case 'ArrowDown':
+          if (video) video.volume = Math.max(0, video.volume - 0.1)
           break
-        }
         case 'KeyF':
-          toggleFullscreen()
+          if (!document.fullscreenElement) containerRef.current?.requestFullscreen()
+          else document.exitFullscreen()
           break
         case 'KeyM':
-          toggleMute()
+          if (video) video.muted = !video.muted
+          break
+        case 'KeyN':
+          if (nextEpisode && onNextEpisode && episodeContext) {
+            const nextEp = episodeContext.episodeList[episodeContext.currentIndex + 1]
+            if (nextEp) {
+              const nextUrl = `${episodeContext.baseUrl}${nextEp.id}.${nextEp.container_extension}`
+              const nextCtx: EpisodeContext = {
+                ...episodeContext,
+                episodeId: nextEp.id,
+                episodeNum: nextEp.episode_num,
+                episodeTitle: nextEp.title || 'Sem Título',
+                container_extension: nextEp.container_extension,
+                currentIndex: episodeContext.currentIndex + 1
+              }
+              onNextEpisode(nextUrl, nextCtx)
+            }
+          }
           break
         case 'Escape':
           if (!document.fullscreenElement) onBack()
@@ -365,56 +385,29 @@ export function PlayerScreen({ url, title, onBack }: PlayerScreenProps) {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [playing, duration])
+  }, [nextEpisode, episodeContext, onNextEpisode, onBack])
 
   const progress = duration > 0 ? (currentTime / duration) * 100 : 0
+
+  // Título exibido no player
+  const displayTitle = episodeContext
+    ? `${episodeContext.seriesNome} · T${episodeContext.seasonNum} E${episodeContext.episodeNum}`
+    : title
 
   return (
     <>
       <style>{`
-        .player-range {
-          -webkit-appearance: none;
-          appearance: none;
-          height: 4px;
-          border-radius: 999px;
-          outline: none;
-          cursor: pointer;
-          background: transparent;
-        }
-        .player-range::-webkit-slider-thumb {
-          -webkit-appearance: none;
-          width: 14px; height: 14px;
-          border-radius: 50%;
-          background: #fff;
-          cursor: pointer;
-          box-shadow: 0 0 4px rgba(0,0,0,0.5);
-          transition: transform 0.15s;
-        }
-        .player-range:hover::-webkit-slider-thumb { transform: scale(1.3); }
-
-        .ctrl-btn {
-          background: none; border: none; cursor: pointer;
-          color: rgba(255,255,255,0.9); display: flex;
-          align-items: center; justify-content: center;
-          padding: 8px; border-radius: 8px;
-          transition: background 0.15s, color 0.15s;
-        }
-        .ctrl-btn:hover { background: rgba(255,255,255,0.1); color: #fff; }
-
-        @keyframes spin { to { transform: rotate(360deg); } }
-        .buffering-spinner {
-          width: 48px; height: 48px;
-          border: 3px solid rgba(255,255,255,0.15);
-          border-top-color: #fff;
-          border-radius: 50%;
-          animation: spin 0.8s linear infinite;
-        }
-
-        @keyframes livePulse {
-          0%,100% { opacity:1; transform:scale(1); }
-          50% { opacity:0.5; transform:scale(0.8); }
-        }
-        .live-dot { animation: livePulse 2s ease-in-out infinite; }
+        .player-range { -webkit-appearance:none; appearance:none; height:4px; border-radius:999px; outline:none; cursor:pointer; background:transparent; }
+        .player-range::-webkit-slider-thumb { -webkit-appearance:none; width:14px; height:14px; border-radius:50%; background:#fff; cursor:pointer; box-shadow:0 0 4px rgba(0,0,0,0.5); transition:transform 0.15s; }
+        .player-range:hover::-webkit-slider-thumb { transform:scale(1.3); }
+        .ctrl-btn { background:none; border:none; cursor:pointer; color:rgba(255,255,255,0.9); display:flex; align-items:center; justify-content:center; padding:8px; border-radius:8px; transition:background 0.15s,color 0.15s; }
+        .ctrl-btn:hover { background:rgba(255,255,255,0.1); color:#fff; }
+        @keyframes spin { to { transform:rotate(360deg); } }
+        .buffering-spinner { width:48px; height:48px; border:3px solid rgba(255,255,255,0.15); border-top-color:#fff; border-radius:50%; animation:spin 0.8s linear infinite; }
+        @keyframes livePulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.5;transform:scale(0.8)} }
+        .live-dot { animation:livePulse 2s ease-in-out infinite; }
+        @keyframes slideUp { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:translateY(0); } }
+        .next-overlay { animation: slideUp 0.3s ease forwards; }
       `}</style>
 
       <div
@@ -434,7 +427,6 @@ export function PlayerScreen({ url, title, onBack }: PlayerScreenProps) {
           fontFamily: tokens.font
         }}
       >
-        {/* Video */}
         <video
           ref={videoRef}
           autoPlay
@@ -442,7 +434,7 @@ export function PlayerScreen({ url, title, onBack }: PlayerScreenProps) {
           style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
         />
 
-        {/* Buffering overlay */}
+        {/* Buffering */}
         {buffering && !hlsError && (
           <div
             style={{
@@ -466,7 +458,7 @@ export function PlayerScreen({ url, title, onBack }: PlayerScreenProps) {
           </div>
         )}
 
-        {/* Error overlay */}
+        {/* Error */}
         {hlsError && (
           <div
             style={{
@@ -516,6 +508,109 @@ export function PlayerScreen({ url, title, onBack }: PlayerScreenProps) {
           </div>
         )}
 
+        {/* Overlay próximo episódio */}
+        {showNextOverlay && nextEpisode && !hlsError && (
+          <div
+            className="next-overlay"
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              position: 'absolute',
+              bottom: '100px',
+              right: '36px',
+              background: 'rgba(10,10,10,0.92)',
+              border: `1px solid ${tokens.border}`,
+              borderRadius: '16px',
+              padding: '16px 20px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '12px',
+              minWidth: '260px',
+              backdropFilter: 'blur(12px)',
+              zIndex: 10
+            }}
+          >
+            <span
+              style={{
+                fontSize: '11px',
+                fontWeight: 600,
+                letterSpacing: '0.08em',
+                color: tokens.textTertiary,
+                textTransform: 'uppercase'
+              }}
+            >
+              A seguir
+            </span>
+            <span
+              style={{
+                fontSize: '14px',
+                fontWeight: 600,
+                color: tokens.textPrimary,
+                lineHeight: 1.3
+              }}
+            >
+              E{nextEpisode.episode_num} — {nextEpisode.title || 'Sem Título'}
+            </span>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button
+                onClick={handleNextEpisode}
+                style={{
+                  flex: 1,
+                  padding: '10px',
+                  borderRadius: '10px',
+                  background: tokens.accent,
+                  border: 'none',
+                  color: '#fff',
+                  fontSize: '13px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  fontFamily: tokens.font,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '6px',
+                  transition: 'opacity 0.2s'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.opacity = '0.85'
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.opacity = '1'
+                }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                  <polygon points="5 3 19 12 5 21 5 3" />
+                </svg>
+                Próximo
+              </button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setShowNextOverlay(false)
+                }}
+                style={{
+                  padding: '10px 14px',
+                  borderRadius: '10px',
+                  background: 'rgba(255,255,255,0.08)',
+                  border: `1px solid ${tokens.border}`,
+                  color: tokens.textSecondary,
+                  fontSize: '13px',
+                  cursor: 'pointer',
+                  fontFamily: tokens.font,
+                  transition: 'color 0.15s'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.color = tokens.textPrimary
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.color = tokens.textSecondary
+                }}
+              >
+                Fechar
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Controls overlay */}
         <div
           style={{
@@ -532,7 +627,7 @@ export function PlayerScreen({ url, title, onBack }: PlayerScreenProps) {
             pointerEvents: controlsVisible ? 'auto' : 'none'
           }}
         >
-          {/* Top bar */}
+          {/* Top */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '20px 28px' }}>
             <button
               className="ctrl-btn"
@@ -553,16 +648,16 @@ export function PlayerScreen({ url, title, onBack }: PlayerScreenProps) {
                 <polyline points="15 18 9 12 15 6" />
               </svg>
             </button>
-            {title && (
+            {displayTitle && (
               <span
                 style={{
                   color: '#fff',
-                  fontSize: '16px',
+                  fontSize: '15px',
                   fontWeight: 600,
                   letterSpacing: '-0.01em'
                 }}
               >
-                {title}
+                {displayTitle}
               </span>
             )}
             {live && (
@@ -599,7 +694,6 @@ export function PlayerScreen({ url, title, onBack }: PlayerScreenProps) {
                 </span>
               </div>
             )}
-            {/* Quality badge */}
             {quality && !live && (
               <span
                 style={{
@@ -615,7 +709,7 @@ export function PlayerScreen({ url, title, onBack }: PlayerScreenProps) {
             )}
           </div>
 
-          {/* Bottom controls */}
+          {/* Bottom */}
           <div
             style={{
               padding: '12px 28px 24px',
@@ -624,7 +718,6 @@ export function PlayerScreen({ url, title, onBack }: PlayerScreenProps) {
               gap: '12px'
             }}
           >
-            {/* Progress bar — só para VOD */}
             {!live && (
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                 <span
@@ -684,9 +777,7 @@ export function PlayerScreen({ url, title, onBack }: PlayerScreenProps) {
               </div>
             )}
 
-            {/* Buttons row */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-              {/* Play/Pause */}
               <button
                 className="ctrl-btn"
                 onClick={(e) => {
@@ -706,7 +797,6 @@ export function PlayerScreen({ url, title, onBack }: PlayerScreenProps) {
                 )}
               </button>
 
-              {/* Skip -10s / +10s — só VOD */}
               {!live && (
                 <>
                   <button
@@ -774,7 +864,23 @@ export function PlayerScreen({ url, title, onBack }: PlayerScreenProps) {
                 </>
               )}
 
-              {/* Volume */}
+              {/* Botão próximo episódio nos controles */}
+              {nextEpisode && !live && (
+                <button
+                  className="ctrl-btn"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    handleNextEpisode()
+                  }}
+                  title="Próximo episódio (N)"
+                >
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                    <polygon points="5 3 15 12 5 21 5 3" />
+                    <rect x="17" y="3" width="2" height="18" rx="1" />
+                  </svg>
+                </button>
+              )}
+
               <button
                 className="ctrl-btn"
                 onClick={(e) => {
@@ -841,10 +947,8 @@ export function PlayerScreen({ url, title, onBack }: PlayerScreenProps) {
                 }}
               />
 
-              {/* Spacer */}
               <div style={{ flex: 1 }} />
 
-              {/* Fullscreen */}
               <button
                 className="ctrl-btn"
                 onClick={(e) => {
@@ -888,7 +992,6 @@ export function PlayerScreen({ url, title, onBack }: PlayerScreenProps) {
           </div>
         </div>
 
-        {/* Click to play/pause (center) — indicator */}
         {!buffering && !hlsError && (
           <div
             onClick={(e) => {

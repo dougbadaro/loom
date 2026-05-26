@@ -4,12 +4,16 @@ import type { Credenciais, Categoria, Midia } from '@renderer/types'
 import { useTopMovies } from '../useTopMovies'
 import { MovieCard } from '../cards/MovieCard'
 import { MovieRow } from './MovieRow'
+import { ContinueWatchingRow } from './ContinueWatchingRow'
 import { Spinner } from '@renderer/components/ui/Spinner'
+import type { WatchEntry } from '../../hooks/useWatchProgress'
 
 interface MoviesLayoutProps {
   credentials: Credenciais
   categorias: Categoria[]
   onPlay: (movie: Midia) => void
+  continueWatchingEntries: WatchEntry[]
+  onRemoveFromContinue: (id: number) => void
 }
 
 const TERMOS_BLOQUEADOS = [
@@ -23,7 +27,13 @@ const TERMOS_BLOQUEADOS = [
   'cinema (cam)'
 ]
 
-export function MoviesLayout({ credentials, categorias, onPlay }: MoviesLayoutProps) {
+export function MoviesLayout({
+  credentials,
+  categorias,
+  onPlay,
+  continueWatchingEntries,
+  onRemoveFromContinue
+}: MoviesLayoutProps) {
   const { topMovies, loading: topLoading } = useTopMovies(credentials)
 
   const [searchQuery, setSearchQuery] = useState('')
@@ -78,7 +88,6 @@ export function MoviesLayout({ credentials, categorias, onPlay }: MoviesLayoutPr
 
   const isSearchActive = searchQuery.trim().length >= 3
 
-  // Busca com debounce — só roda quando isSearchActive
   useEffect(() => {
     if (!isSearchActive) return
 
@@ -122,7 +131,6 @@ export function MoviesLayout({ credentials, categorias, onPlay }: MoviesLayoutPr
     return () => clearTimeout(timer)
   }, [searchQuery, isSearchActive, serverUrl, username, password])
 
-  // Resultados exibidos: derivados do estado, não sincronizados via efeito
   const resultadosVisiveis = isSearchActive ? searchResults : []
 
   return (
@@ -199,6 +207,7 @@ export function MoviesLayout({ credentials, categorias, onPlay }: MoviesLayoutPr
         </section>
       ) : (
         <>
+          {/* Top 10 */}
           {!topLoading && topMovies.length > 0 && (
             <section style={{ marginBottom: '40px' }}>
               <h2
@@ -244,6 +253,14 @@ export function MoviesLayout({ credentials, categorias, onPlay }: MoviesLayoutPr
             </section>
           )}
 
+          {/* Continue Assistindo — após Top 10 */}
+          <ContinueWatchingRow
+            entries={continueWatchingEntries}
+            onPlay={onPlay}
+            onRemove={onRemoveFromContinue}
+          />
+
+          {/* Rows por categoria */}
           <section>
             {categoriasValidas.map((categoria) => (
               <MovieRow

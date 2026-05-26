@@ -2,17 +2,52 @@ import { useState } from 'react'
 import { SeriesData, Credenciais, Episodio } from '../../types'
 import { tokens } from '@renderer/styles/tokens'
 import { IconPlay } from '@renderer/components/icons/IconPlay'
+import type { SeriesWatchEntry } from '../Catalog/hooks/useWatchProgress'
+import { EpisodeContext } from './EpisodeContext'
 
 interface SeriesScreenProps {
   data: SeriesData
   credentials: Credenciais
   onBack: () => void
-  onPlay: (url: string) => void
+  onPlayEpisode: (url: string, context: EpisodeContext) => void
+  episodeProgress: Record<string, SeriesWatchEntry>
+  /** ID da série — necessário para montar o contexto do episódio */
+  seriesId: number
 }
 
-export function SeriesScreen({ data, credentials, onBack, onPlay }: SeriesScreenProps) {
+export function SeriesScreen({
+  data,
+  credentials,
+  onBack,
+  onPlayEpisode,
+  episodeProgress,
+  seriesId
+}: SeriesScreenProps) {
   const seasons = data.episodes ? Object.keys(data.episodes) : []
   const [activeSeason, setActiveSeason] = useState(seasons[0] ?? '')
+
+  const baseUrl = `${credentials.serverUrl}/series/${credentials.username}/${credentials.password}/`
+  const episodeList = data.episodes[activeSeason] ?? []
+
+  const handlePlay = (ep: Episodio, index: number) => {
+    const url = `${baseUrl}${ep.id}.${ep.container_extension}`
+
+    const context: EpisodeContext = {
+      seriesId,
+      seriesNome: data.info?.name ?? '',
+      seriesCapa: data.info?.cover ?? '',
+      episodeId: ep.id,
+      episodeNum: ep.episode_num,
+      episodeTitle: ep.title || 'Sem Título',
+      seasonNum: activeSeason,
+      container_extension: ep.container_extension,
+      episodeList,
+      currentIndex: index,
+      baseUrl
+    }
+
+    onPlayEpisode(url, context)
+  }
 
   return (
     <div
@@ -70,7 +105,6 @@ export function SeriesScreen({ data, credentials, onBack, onPlay }: SeriesScreen
             {data.info?.name}
           </h1>
 
-          {/* Season tabs */}
           {seasons.length > 1 && (
             <div style={{ display: 'flex', gap: '8px', marginBottom: '32px', flexWrap: 'wrap' }}>
               {seasons.map((s) => (
@@ -95,7 +129,6 @@ export function SeriesScreen({ data, credentials, onBack, onPlay }: SeriesScreen
             </div>
           )}
 
-          {/* Episode list */}
           <div
             style={{
               display: 'flex',
@@ -106,13 +139,16 @@ export function SeriesScreen({ data, credentials, onBack, onPlay }: SeriesScreen
               paddingRight: '8px'
             }}
           >
-            {(data.episodes[activeSeason] ?? []).map((ep: Episodio) => {
-              const url = `${credentials.serverUrl}/series/${credentials.username}/${credentials.password}/${ep.id}.${ep.container_extension}`
+            {episodeList.map((ep: Episodio, index: number) => {
+              const saved = episodeProgress[ep.id]
+              const progressRatio = saved?.duration > 0 ? saved.currentTime / saved.duration : 0
+              const hasProgress = progressRatio > 0
+
               return (
                 <button
                   key={ep.id}
                   className="ep-row"
-                  onClick={() => onPlay(url)}
+                  onClick={() => handlePlay(ep, index)}
                   style={{
                     padding: '18px 22px',
                     backgroundColor: tokens.surface,
@@ -122,9 +158,33 @@ export function SeriesScreen({ data, credentials, onBack, onPlay }: SeriesScreen
                     gap: '16px',
                     textAlign: 'left',
                     cursor: 'pointer',
-                    fontFamily: tokens.font
+                    fontFamily: tokens.font,
+                    position: 'relative',
+                    overflow: 'hidden'
                   }}
                 >
+                  {hasProgress && (
+                    <div
+                      style={{
+                        position: 'absolute',
+                        bottom: 0,
+                        left: 0,
+                        right: 0,
+                        height: '2px',
+                        background: 'rgba(255,255,255,0.08)'
+                      }}
+                    >
+                      <div
+                        style={{
+                          height: '100%',
+                          width: `${progressRatio * 100}%`,
+                          background: tokens.accent,
+                          borderRadius: '0 2px 2px 0'
+                        }}
+                      />
+                    </div>
+                  )}
+
                   <span style={{ color: tokens.accent, flexShrink: 0 }}>
                     <IconPlay />
                   </span>
@@ -145,11 +205,17 @@ export function SeriesScreen({ data, credentials, onBack, onPlay }: SeriesScreen
                       fontWeight: 500,
                       overflow: 'hidden',
                       textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap'
+                      whiteSpace: 'nowrap',
+                      flex: 1
                     }}
                   >
                     {ep.title || 'Sem Título'}
                   </span>
+                  {hasProgress && (
+                    <span style={{ fontSize: '11px', color: tokens.textTertiary, flexShrink: 0 }}>
+                      {Math.round(progressRatio * 100)}%
+                    </span>
+                  )}
                 </button>
               )
             })}

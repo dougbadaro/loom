@@ -74,6 +74,12 @@ export function PlayerScreen({
   /** Mostra overlay "Próximo episódio" nos últimos 30s */
   const [showNextOverlay, setShowNextOverlay] = useState(false)
 
+  // Estados para Áudio e Legenda
+  const [audioTracks, setAudioTracks] = useState<any[]>([])
+  const [subtitleTracks, setSubtitleTracks] = useState<any[]>([])
+  const [activeAudio, setActiveAudio] = useState<number>(-1)
+  const [activeSubtitle, setActiveSubtitle] = useState<number>(-1)
+
   // Episódio seguinte — calculado a partir do contexto
   const nextEpisode = episodeContext
     ? (episodeContext.episodeList[episodeContext.currentIndex + 1] ?? null)
@@ -122,6 +128,26 @@ export function PlayerScreen({
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         if (startTime > 0) video.currentTime = startTime
         video.play().catch(() => {})
+      })
+
+      hls.on(Hls.Events.AUDIO_TRACKS_UPDATED, (_, data) => {
+        console.log('[HLS] Trilhas de Áudio:', data.audioTracks)
+        setAudioTracks(data.audioTracks || [])
+        setActiveAudio(hls.audioTrack)
+      })
+
+      hls.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, (_, data) => {
+        console.log('[HLS] Trilhas de Legenda:', data.subtitleTracks)
+        setSubtitleTracks(data.subtitleTracks || [])
+        setActiveSubtitle(hls.subtitleTrack)
+      })
+
+      hls.on(Hls.Events.AUDIO_TRACK_SWITCHED, (_, data) => {
+        setActiveAudio(data.id)
+      })
+
+      hls.on(Hls.Events.SUBTITLE_TRACK_SWITCH, (_, data) => {
+        setActiveSubtitle(data.id)
       })
 
       hls.on(Hls.Events.LEVEL_SWITCHED, (_, data) => {
@@ -327,6 +353,22 @@ export function PlayerScreen({
     const video = videoRef.current
     if (!video) return
     video.currentTime = Math.min(Math.max(0, video.currentTime + s), duration)
+  }
+
+  const handleAudioChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const trackId = Number(e.target.value)
+    if (hlsRef.current) {
+      hlsRef.current.audioTrack = trackId
+      setActiveAudio(trackId)
+    }
+  }
+
+  const handleSubtitleChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const trackId = Number(e.target.value)
+    if (hlsRef.current) {
+      hlsRef.current.subtitleTrack = trackId
+      setActiveSubtitle(trackId)
+    }
   }
 
   // ── Keyboard ──────────────────────────────────────────────────────────────────
@@ -948,6 +990,58 @@ export function PlayerScreen({
               />
 
               <div style={{ flex: 1 }} />
+
+              {/* Controles de Áudio e Legenda */}
+              {audioTracks.length > 0 && (
+                <select
+                  value={activeAudio}
+                  onChange={handleAudioChange}
+                  onClick={(e) => e.stopPropagation()}
+                  style={{
+                    background: 'transparent',
+                    color: 'rgba(255,255,255,0.7)',
+                    border: 'none',
+                    outline: 'none',
+                    cursor: 'pointer',
+                    fontSize: '12px',
+                    fontFamily: tokens.font,
+                    marginRight: '8px'
+                  }}
+                >
+                  {audioTracks.map((track, i) => (
+                    <option key={i} value={i} style={{ background: '#000' }}>
+                      {track.name || track.lang || `Áudio ${i + 1}`}
+                    </option>
+                  ))}
+                </select>
+              )}
+
+              {subtitleTracks.length > 0 && (
+                <select
+                  value={activeSubtitle}
+                  onChange={handleSubtitleChange}
+                  onClick={(e) => e.stopPropagation()}
+                  style={{
+                    background: 'transparent',
+                    color: 'rgba(255,255,255,0.7)',
+                    border: 'none',
+                    outline: 'none',
+                    cursor: 'pointer',
+                    fontSize: '12px',
+                    fontFamily: tokens.font,
+                    marginRight: '12px'
+                  }}
+                >
+                  <option value="-1" style={{ background: '#000' }}>
+                    Sem legenda
+                  </option>
+                  {subtitleTracks.map((track, i) => (
+                    <option key={i} value={i} style={{ background: '#000' }}>
+                      {track.name || track.lang || `Legenda ${i + 1}`}
+                    </option>
+                  ))}
+                </select>
+              )}
 
               <button
                 className="ctrl-btn"
